@@ -5,12 +5,12 @@ Token economy and utility systems for distribution, converion, and interaction o
 
 RESOURCES
 
-Bonding Tokens that continuously mint ERC20s with decentralized market mechanics.
+ERC20 Bonding Tokens that continuously mint ERC20s with decentralized market mechanics.
 
 
 CONVERTERS
 
-Contracts that handle consuming token(s) of a type to produce token(s) of another type.
+ERC721s that handle consuming token(s) of a type to produce token(s) of another type.
 
 
 FABRICATORS

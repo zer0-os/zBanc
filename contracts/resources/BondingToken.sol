@@ -1,10 +1,12 @@
 // SPDX-License-Identifier: MIT
 pragma solidity 0.8.24;
 
+
 import {IBondingToken} from './IBondingToken.sol';
 import {Ownable} from "@openzeppelin/contracts/access/Ownable.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {ERC4626, ERC20, Math} from "@openzeppelin/contracts/token/ERC20/extensions/ERC4626.sol";
+import {SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 
 /**
  * @title BondingToken
@@ -40,6 +42,14 @@ contract BondingToken is IBondingToken, Ownable, ERC4626 {
     /// @param exitFeeBasisPoints The new exit fee in basis points.
     event ExitFeeSet(uint256 exitFeeBasisPoints);
 
+    /// @notice Emitted when the entry fee recipient is set.
+    /// @param recipient The new entry fee recipient.
+    event EntryFeeRecipientSet(address recipient);
+
+    /// @notice Emitted when the exit fee recipient is set.
+    /// @param recipient The new exit fee recipient.
+    event ExitFeeRecipientSet(address recipient);
+
     /// @notice The constant basis point used for fee calculations, equivalent to 10000.
     /// @dev This represents 100% in basis points, where 1 basis point is 0.01%.
     uint256 public constant BASIS = 1e4;
@@ -51,6 +61,14 @@ contract BondingToken is IBondingToken, Ownable, ERC4626 {
     /// @notice The exit fee basis points.
     /// @dev This fee is applied when redeeming and withdrawing.
     uint256 public exitFee;
+
+    /// @notice The receiver of the entry fees
+    /// @dev This recipient is paid when depositing and minting.
+    address public entryFeeRecipient;
+
+    /// @notice The receiver of the exit fees
+    /// @dev This recipient is paid when depositing and minting.
+    address public exitFeeRecipient;
 
     /// @notice Initializes the contract with the given parameters and sets up the necessary inheritance.
     /// @param name The name of the ERC20 token.
@@ -150,6 +168,24 @@ contract BondingToken is IBondingToken, Ownable, ERC4626 {
         }
         exitFee = exitFeeBasisPoints;
         emit ExitFeeSet(exitFeeBasisPoints);
+    }
+
+    /**
+     * @dev Sets the entry fee recipient.
+     * @param newRecipient The new entry fee recipient.
+     */
+    function setEntryFeeRecipient(address newRecipient) public onlyOwner {
+        entryFeeRecipient = newRecipient;
+        emit EntryFeeRecipientSet(newRecipient);
+    }
+
+    /**
+     * @dev Sets the exit fee recipient.
+     * @param newRecipient The new exit fee recipient.
+     */
+    function setExitFeeRecipient(address newRecipient) public onlyOwner {
+        exitFeeRecipient = newRecipient;
+        emit ExitFeeRecipientSet(newRecipient);
     }
 
     /// @dev Calculates the fees that should be added to an amount `assets` that does not already include fees.
