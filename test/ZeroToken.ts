@@ -29,7 +29,7 @@ describe.only("ZeroToken Tests", function () {
         const reserveTokenAddress = await reserveToken.getAddress();
 
         const bondingTokenFactory = await hre.ethers.getContractFactory(contract.name);
-        const bondingToken = await bondingTokenFactory.deploy(contract.tokenName, contract.tokenSymbol, reserveTokenAddress, 0, 0, 0, 0, 0, 0) as ZeroToken;
+        const bondingToken = await bondingTokenFactory.deploy(contract.tokenName, contract.tokenSymbol, reserveTokenAddress, 0, 0, 100, 100, 0, 0, reserveTokenAddress) as ZeroToken;
         const bondingTokenAddress = await bondingToken.getAddress();
 
         return { bondingToken, bondingTokenAddress, reserveToken, reserveTokenAddress, deployer, user, userAddress, user1, user1Address, user2, user2Address, user3, user3Address , strategicUser, strategicUserAddress};
@@ -45,6 +45,8 @@ describe.only("ZeroToken Tests", function () {
       
       const exitFees = [0, basis/10000, basis/1000, basis/100, basis/10, basis/2 - 1];
       const entryFees = [basis/2 - 1, basis/10, basis/100, basis/1000, basis/10000, 0];
+      const creatorEntryFees = [basis/1000, basis/100, basis/10];
+      const creatorExitFees = [basis/1000, basis/100, basis/10];
 
       const numUsers = [1, 2, 3, 4];
 
@@ -108,110 +110,105 @@ describe.only("ZeroToken Tests", function () {
         });
         entryFees.forEach(entryFee => {
           exitFees.forEach(exitFee => {
-            /*it(`should set entry fee ${entryFee} bps and exit fee ${exitFee} bps`, async function () {
-              if (basis >= entryFee * 2) {
-                await bondingToken.setEntryFee(entryFee);
-              } else {
-                await expect(bondingToken.setEntryFee(entryFee)).to.be.revertedWithCustomError(bondingToken, "EntryFeeExceedsLimit");
-              }
-          
-              if (basis >= exitFee * 2) {
-                  await bondingToken.setExitFee(exitFee);
-              } else {
-                await expect(bondingToken.setExitFee(exitFee)).to.be.revertedWithCustomError(bondingToken, "ExitFeeExceedsLimit");
-              }
-            });*/
+            creatorEntryFees.forEach(creatorEntryFee => {
+              creatorExitFees.forEach(creatorExitFee => {
+                it(`should set entry fee ${entryFee} bps and exit fee ${exitFee} bps`, async function () {
+                  await bondingToken.setVaultFees(entryFee, exitFee);
+                  await bondingToken.setCreatorFees(creatorEntryFee, creatorExitFee);
+                });
 
-            numUsers.forEach(userCount => {
-              for (let i = 0; i < 3; i++) {
-                const rand = getRandomAmount(0n, 100n);
-                const depositOrRedeem = rand < 50;
-            
-                if (depositOrRedeem) {
-                  it(`should deposit for ${userCount} users with entry fee ${entryFee} bps and exit fee ${exitFee} bps`, async function () {
-                    const selectedUsers = users.slice(0, userCount);
-            
-                    for (const user of selectedUsers) {
+                numUsers.forEach(userCount => {
+                  for (let i = 0; i < 3; i++) {
+                    const rand = getRandomAmount(0n, 100n);
+                    const depositOrRedeem = rand < 50;
+                
+                    if (depositOrRedeem) {
+                      it(`should deposit for ${userCount} users with entry fee ${entryFee} bps and exit fee ${exitFee} bps`, async function () {
+                        const selectedUsers = users.slice(0, userCount);
+                
+                        for (const user of selectedUsers) {
 
-                      const userAddress = await user.getAddress();
-                      const balance = await reserveToken.balanceOf(userAddress);
-                      const previousBTBalance = await bondingToken.balanceOf(userAddress);
-                      //console.log("before: ", userAddress, " bt: ", previousBTBalance, " rt: ", balance);
+                          const userAddress = await user.getAddress();
+                          const balance = await reserveToken.balanceOf(userAddress);
+                          const previousBTBalance = await bondingToken.balanceOf(userAddress);
+                          //console.log("before: ", userAddress, " bt: ", previousBTBalance, " rt: ", balance);
 
-                      const max = await bondingToken.maxDeposit(userAddress);
-                      const amount = balance < max ? getRandomAmount(1n, balance - 1n) : getRandomAmount(1n, max - 1n);
-                      //console.log("deposit: ", amount);
-                      await reserveToken.connect(user).approve(bondingTokenAddress, amount);
-                      const expectedShares = await getExpectedShares(bondingToken, amount);
-            
-                      await expect(bondingToken.connect(user).deposit(amount, userAddress))
-                        .to.emit(bondingToken, 'Deposit')
-                        .withArgs(userAddress, userAddress, amount, expectedShares);
-            
-                      const actualShares = await bondingToken.balanceOf(userAddress) - previousBTBalance;
-                      expect(actualShares).to.equal(expectedShares);
-            
-                      const userIndex = users.indexOf(user);
+                          const max = await bondingToken.maxDeposit(userAddress);
+                          const amount = balance < max ? getRandomAmount(1n, balance - 1n) : getRandomAmount(1n, max - 1n);
+                          //console.log("deposit: ", amount);
+                          await reserveToken.connect(user).approve(bondingTokenAddress, amount);
+                          const expectedShares = await getExpectedShares(bondingToken, amount);
+                
+                          await expect(bondingToken.connect(user).deposit(amount, userAddress))
+                            .to.emit(bondingToken, 'Deposit')
+                            .withArgs(userAddress, userAddress, amount, expectedShares);
+                
+                          const actualShares = await bondingToken.balanceOf(userAddress) - previousBTBalance;
+                          expect(actualShares).to.equal(expectedShares);
+                
+                          const userIndex = users.indexOf(user);
+                          const btBalance = await bondingToken.balanceOf(userAddress);
+                          allData.users[userIndex].shares.push(btBalance.toString());
+                
+                          const rtBalance = await reserveToken.balanceOf(userAddress);
+                          allData.users[userIndex].assets.push(rtBalance.toString());
+                        }
+                
+                        await recordTokenData();
+                      });
+                    } else {
+                      it(`should redeem for ${userCount} users with entry fee ${entryFee} bps and exit fee ${exitFee} bps`, async function () {
+                        const selectedUsers = users.slice(0, userCount);
+                
+                        for (const user of selectedUsers) {
+                          const userAddress = await user.getAddress();
+                          const balance = await bondingToken.balanceOf(userAddress);
+                          const sharesToRedeem = getRandomAmount(1n, balance - 1n);
+                          const expectedAssets = await getExpectedAssets(bondingToken, sharesToRedeem);
+                          const previousRTBalance = await reserveToken.balanceOf(userAddress);
+                          
+                          const contractBalance = await bondingToken.totalAssets();
+                          if(expectedAssets > contractBalance){
+                            console.log("exp ", expectedAssets, "bal ", contractBalance);
+                          }
+                
+                          await expect(bondingToken.connect(user).redeem(sharesToRedeem, userAddress, userAddress))
+                            .to.emit(bondingToken, 'Withdraw')
+                            .withArgs(userAddress, userAddress, userAddress, expectedAssets, sharesToRedeem);
+                
+                          const actualAssets = await reserveToken.balanceOf(userAddress) - previousRTBalance;
+                          expect(actualAssets).to.equal(expectedAssets);
+                
+                          const userIndex = users.indexOf(user);
+                          await recordUserData(userIndex);
+                          await recordTokenData();
+                        }
+                      });
+                    }
+                
+                    async function recordUserData(userIndex : number) {
+                      const userAddress = users[userIndex];
+                
                       const btBalance = await bondingToken.balanceOf(userAddress);
                       allData.users[userIndex].shares.push(btBalance.toString());
-            
+                
                       const rtBalance = await reserveToken.balanceOf(userAddress);
                       allData.users[userIndex].assets.push(rtBalance.toString());
                     }
-            
-                    await recordTokenData();
-                  });
-                } else {
-                  it(`should redeem for ${userCount} users with entry fee ${entryFee} bps and exit fee ${exitFee} bps`, async function () {
-                    const selectedUsers = users.slice(0, userCount);
-            
-                    for (const user of selectedUsers) {
-                      const userAddress = await user.getAddress();
-                      const balance = await bondingToken.balanceOf(userAddress);
-                      const sharesToRedeem = getRandomAmount(1n, balance - 1n);
-                      const expectedAssets = await getExpectedAssets(bondingToken, sharesToRedeem);
-                      const previousRTBalance = await reserveToken.balanceOf(userAddress);
-                      
-                      const contractBalance = await bondingToken.totalAssets();
-                      if(expectedAssets > contractBalance){
-                        console.log("exp ", expectedAssets, "bal ", contractBalance);
-                      }
-            
-                      await expect(bondingToken.connect(user).redeem(sharesToRedeem, userAddress, userAddress))
-                        .to.emit(bondingToken, 'Withdraw')
-                        .withArgs(userAddress, userAddress, userAddress, expectedAssets, sharesToRedeem);
-            
-                      const actualAssets = await reserveToken.balanceOf(userAddress) - previousRTBalance;
-                      expect(actualAssets).to.equal(expectedAssets);
-            
-                      const userIndex = users.indexOf(user);
-                      await recordUserData(userIndex);
-                      await recordTokenData();
+                
+                    async function recordTokenData() {
+                      // Calculate and record token data
+                      const totalSupply = await bondingToken.totalSupply();
+                      const totalAssets = await bondingToken.totalAssets();
+                      const checkAmt = 10n ** 18n;
+                      const tokenPrice = checkAmt / (await bondingToken.convertToShares(checkAmt) + 1n);
+                      allData.tokenPrices.push(tokenPrice.toString());
+                      allData.totalSupply.push(totalSupply.toString());
+                      allData.totalAssets.push(totalAssets.toString());
                     }
-                  });
-                }
-            
-                async function recordUserData(userIndex : number) {
-                  const userAddress = users[userIndex];
-            
-                  const btBalance = await bondingToken.balanceOf(userAddress);
-                  allData.users[userIndex].shares.push(btBalance.toString());
-            
-                  const rtBalance = await reserveToken.balanceOf(userAddress);
-                  allData.users[userIndex].assets.push(rtBalance.toString());
-                }
-            
-                async function recordTokenData() {
-                  // Calculate and record token data
-                  const totalSupply = await bondingToken.totalSupply();
-                  const totalAssets = await bondingToken.totalAssets();
-                  const checkAmt = 10n ** 18n;
-                  const tokenPrice = checkAmt / (await bondingToken.convertToShares(checkAmt) + 1n);
-                  allData.tokenPrices.push(tokenPrice.toString());
-                  allData.totalSupply.push(totalSupply.toString());
-                  allData.totalAssets.push(totalAssets.toString());
-                }
-              }
+                  }
+                });
+              });
             });
           });
         });
@@ -240,7 +237,7 @@ describe.only("ZeroToken Tests", function () {
         const reserveTokenAddress = await reserveToken.getAddress();
 
         const bondingTokenFactory = await hre.ethers.getContractFactory(contract.name);
-        const bondingToken = await bondingTokenFactory.deploy(contract.tokenName, contract.tokenSymbol, reserveTokenAddress, 0, 0, 0, 0, 0, 0) as BondingToken;
+        const bondingToken = await bondingTokenFactory.deploy(contract.tokenName, contract.tokenSymbol, reserveTokenAddress, 0, 0, 0, 0, 0, 0, reserveTokenAddress) as BondingToken;
         const bondingTokenAddress = await bondingToken.getAddress();
 
         return { bondingToken, bondingTokenAddress, reserveToken, reserveTokenAddress, deployer, user, userAddress, user1, user1Address, user2, user2Address, user3, user3Address };
@@ -305,6 +302,7 @@ describe.only("ZeroToken Tests", function () {
           exitFees.forEach(exitFee => {
             it(`should set entry fee ${entryFee} bps and exit fee ${exitFee} bps`, async function () {
               await bondingToken.setVaultFees(entryFee, exitFee);
+              await bondingToken.setCreatorFees(entryFee, exitFee);
             });
 
             numUsers.forEach(userCount => {
