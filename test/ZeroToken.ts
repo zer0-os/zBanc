@@ -18,6 +18,7 @@ describe.only("ZeroToken Tests", function () {
       async function deploy() {
         const [deployer, user, user1, user2, user3, strategicUser] = await hre.ethers.getSigners();
         
+        const deployerAddress = await deployer.getAddress();
         const userAddress = await user.getAddress();
         const user1Address = await user1.getAddress();
         const user2Address = await user2.getAddress();
@@ -29,7 +30,7 @@ describe.only("ZeroToken Tests", function () {
         const reserveTokenAddress = await reserveToken.getAddress();
 
         const bondingTokenFactory = await hre.ethers.getContractFactory(contract.name);
-        const bondingToken = await bondingTokenFactory.deploy(contract.tokenName, contract.tokenSymbol, reserveTokenAddress, 0, 0, 100, 100, 0, 0, reserveTokenAddress) as ZeroToken;
+        const bondingToken = await bondingTokenFactory.deploy(contract.tokenName, contract.tokenSymbol, reserveTokenAddress, 0, 0, 100, 100, 0, 0, deployerAddress) as ZeroToken;
         const bondingTokenAddress = await bondingToken.getAddress();
 
         return { bondingToken, bondingTokenAddress, reserveToken, reserveTokenAddress, deployer, user, userAddress, user1, user1Address, user2, user2Address, user3, user3Address , strategicUser, strategicUserAddress};
@@ -115,6 +116,15 @@ describe.only("ZeroToken Tests", function () {
                 it(`should set entry fee ${entryFee} bps and exit fee ${exitFee} bps`, async function () {
                   await bondingToken.setVaultFees(entryFee, exitFee);
                   await bondingToken.setCreatorFees(creatorEntryFee, creatorExitFee);
+                  await bondingToken.setProtocolFees(creatorEntryFee, creatorExitFee);
+                  const feeData = await bondingToken.getFeeData();
+
+                  expect(entryFee).to.equal(feeData[0]);
+                  expect(exitFee).to.equal(feeData[1]);
+                  expect(creatorEntryFee).to.equal(feeData[2]);
+                  expect(creatorExitFee).to.equal(feeData[3]);
+                  expect(creatorEntryFee).to.equal(feeData[4]);
+                  expect(creatorExitFee).to.equal(feeData[5]);
                 });
 
                 numUsers.forEach(userCount => {
