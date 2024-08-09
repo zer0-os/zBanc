@@ -104,12 +104,6 @@ contract ZeroToken is IZeroToken, Ownable, ERC4626 {
     /// @dev This recipient is paid during any deposit or withdraw.
     address private creatorFeeRecipient;
 
-    ///@notice Returns fee amounts and recipients
-    ///@dev Consolidates all fee amounts and recipients into one getter.
-    function getFeeData() public view override returns (uint256 entryFeeVault, uint256 exitFeeVault, uint256 entryFeeProtocol, uint256 exitFeeProtocol, uint256 entryFeeCreator, uint256 exitFeeCreator, address feeRecipientProtocol, address feeRecipientCreator){
-        return (vaultEntryFee, vaultExitFee, protocolEntryFee, protocolExitFee, creatorEntryFee, creatorExitFee, protocolFeeRecipient, creatorFeeRecipient);
-    }
-
     /// @notice Initializes the contract with the given parameters and sets up the necessary inheritance.
     /// @param name The name of the ERC20 token.
     /// @param symbol The symbol of the ERC20 token.
@@ -145,6 +139,12 @@ contract ZeroToken is IZeroToken, Ownable, ERC4626 {
         protocolFeeRecipient = protocolAddress;
 
         emit ZeroTokenDeployed(msg.sender, name, symbol, address(reserveToken), protocolAddress);
+    }
+
+    ///@notice Returns fee amounts and recipients
+    ///@dev Consolidates all fee amounts and recipients into one getter.
+    function getFeeData() public view override returns (uint256 entryFeeVault, uint256 exitFeeVault, uint256 entryFeeProtocol, uint256 exitFeeProtocol, uint256 entryFeeCreator, uint256 exitFeeCreator, address feeRecipientProtocol, address feeRecipientCreator){
+        return (vaultEntryFee, vaultExitFee, protocolEntryFee, protocolExitFee, creatorEntryFee, creatorExitFee, protocolFeeRecipient, creatorFeeRecipient);
     }
 
     /**
@@ -208,14 +208,35 @@ contract ZeroToken is IZeroToken, Ownable, ERC4626 {
         super._deposit(caller, receiver, assets, shares);
 
         if (protocolFee > 0) {
-            SafeERC20.safeTransfer(IERC20(asset()), protocolFeeRecipient, _feeOnTotal(assets, protocolEntryFee));
+            SafeERC20.safeTransfer(IERC20(asset()), protocolFeeRecipient, protocolFee);
         }
         if (creatorFee > 0) {
-            SafeERC20.safeTransfer(IERC20(asset()), creatorFeeRecipient, _feeOnRaw(assets, creatorEntryFee));
+            SafeERC20.safeTransfer(IERC20(asset()), creatorFeeRecipient, creatorFee);
         }
     }
 
-        /**
+    /// @dev Send exit fee to {_exitFeeRecipient}. See {IERC4626-_deposit}.
+    function _withdraw(
+        address caller,
+        address receiver,
+        address owner,
+        uint256 assets,
+        uint256 shares
+    ) internal virtual override {
+        uint256 protocolFee = _feeOnRaw(assets, protocolExitFee);
+        uint256 creatorFee = _feeOnRaw(assets, creatorExitFee);
+
+        super._withdraw(caller, receiver, owner, assets, shares);
+
+        if (protocolFee > 0) {
+            SafeERC20.safeTransfer(IERC20(asset()), protocolFeeRecipient, protocolFee);
+        }
+        if (creatorFee > 0) {
+            SafeERC20.safeTransfer(IERC20(asset()), creatorFeeRecipient, creatorFee);
+        }
+    }
+
+    /**
      * @dev Sets the vault fees.
      * @param entryFeeBasisPoints The new entry fee in basis points. Must not exceed 50%.
      * @param exitFeeBasisPoints The new exit fee in basis points. Must not exceed 50%.
@@ -286,27 +307,6 @@ contract ZeroToken is IZeroToken, Ownable, ERC4626 {
         protocolExitFee = exitFeeBasisPoints;
 
         emit ProtocolFeesSet(protocolEntryFee, protocolExitFee);
-    }
-
-    /// @dev Send exit fee to {_exitFeeRecipient}. See {IERC4626-_deposit}.
-    function _withdraw(
-        address caller,
-        address receiver,
-        address owner,
-        uint256 assets,
-        uint256 shares
-    ) internal virtual override {
-        uint256 protocolFee = _feeOnRaw(assets, protocolExitFee);
-        uint256 creatorFee = _feeOnRaw(assets, creatorExitFee);
-
-        super._withdraw(caller, receiver, owner, assets, shares);
-
-        if (protocolFee > 0) {
-            SafeERC20.safeTransfer(IERC20(asset()), protocolFeeRecipient, protocolFee);
-        }
-        if (creatorFee > 0) {
-            SafeERC20.safeTransfer(IERC20(asset()), creatorFeeRecipient, creatorFee);
-        }
     }
 
     /// @dev Calculates the fees that should be added to an amount `assets` that does not already include fees.
