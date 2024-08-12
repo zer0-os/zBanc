@@ -9,8 +9,8 @@ import {ERC4626, ERC20, Math} from "@openzeppelin/contracts/token/ERC20/extensio
 import {SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 
 /**
- * @title BondingToken
- * @dev BondingToken contract. Enables entry and exit fees on an ERC4626 vault.
+ * @title ZeroToken
+ * @dev ZeroToken contract. Enables entry and exit fees on an ERC4626 vault.
  * @custom:security-contact admin@zero.tech
  */
 contract ZeroToken is IZeroToken, Ownable, ERC4626 {
@@ -26,7 +26,7 @@ contract ZeroToken is IZeroToken, Ownable, ERC4626 {
     error NoRecipient();
 
     ///@notice Thrown when non protocol fee recipient address tries to set protocol fees
-    error NotProtocolRecipient();
+    error NotProtocolAddress();
 
     /// @notice Emitted when the contract is initialized.
     /// @param deployer The address of the contract deployer
@@ -37,8 +37,7 @@ contract ZeroToken is IZeroToken, Ownable, ERC4626 {
         address deployer,
         string name,
         string symbol,
-        address reserveToken,
-        address protocol
+        address reserveToken
     );
 
     /// @notice Emitted when the entry fee is set.
@@ -88,7 +87,7 @@ contract ZeroToken is IZeroToken, Ownable, ERC4626 {
     /// @dev This fee is applied when redeeming and withdrawing.
     uint256 private protocolExitFee;
 
-        /// @notice The entry fee basis points, paid to creator address.
+    /// @notice The entry fee basis points, paid to creator address.
     /// @dev This fee is applied when depositing and minting.
     uint256 private creatorEntryFee;
 
@@ -104,6 +103,15 @@ contract ZeroToken is IZeroToken, Ownable, ERC4626 {
     /// @dev This recipient is paid during any deposit or withdraw.
     address private creatorFeeRecipient;
 
+    /// @notice Enforces that msg.sender is the protocol fee recipient address.
+    /// @dev Not enforced when protocolFeeRecipient is uninitialized.
+    modifier onlyProtocol(){
+        if(msg.sender != protocolFeeRecipient && protocolFeeRecipient != address(0)){
+            revert NotProtocolAddress();
+        }
+        _;
+    }
+
     /// @notice Initializes the contract with the given parameters and sets up the necessary inheritance.
     /// @param name The name of the ERC20 token.
     /// @param symbol The symbol of the ERC20 token.
@@ -114,7 +122,8 @@ contract ZeroToken is IZeroToken, Ownable, ERC4626 {
     /// @param protocolExitFeeBps The exit fee in basis points (1 basis point = 0.01%).
     /// @param creatorEntryFeeBps The entry fee in basis points (1 basis point = 0.01%).
     /// @param creatorExitFeeBps The exit fee in basis points (1 basis point = 0.01%).
-    /// @dev This constructor initializes the contract by setting the entry and exit fees.
+    /// @param protocolAddress The protocol fee recipient address.
+    /// @dev This constructor initializes the contract by setting the entry and exit fees and recipients.
     constructor(
         string memory name,
         string memory symbol,
@@ -134,16 +143,23 @@ contract ZeroToken is IZeroToken, Ownable, ERC4626 {
         setVaultFees(vaultEntryFeeBps, vaultExitFeeBps);
         setProtocolFees(protocolEntryFeeBps, protocolExitFeeBps);
         setCreatorFees(creatorEntryFeeBps, creatorExitFeeBps);
+        setCreatorFeeRecipient(msg.sender);
+        setProtocolFeeRecipient(protocolAddress);
 
-        creatorFeeRecipient = msg.sender;
-        protocolFeeRecipient = protocolAddress;
-
-        emit ZeroTokenDeployed(msg.sender, name, symbol, address(reserveToken), protocolAddress);
+        emit ZeroTokenDeployed(msg.sender, name, symbol, address(reserveToken));
     }
 
-    ///@notice Returns fee amounts and recipients
+    ///@notice Returns fee amounts and recipients.
     ///@dev Consolidates all fee amounts and recipients into one getter.
-    function getFeeData() public view override returns (uint256 entryFeeVault, uint256 exitFeeVault, uint256 entryFeeProtocol, uint256 exitFeeProtocol, uint256 entryFeeCreator, uint256 exitFeeCreator, address feeRecipientProtocol, address feeRecipientCreator){
+    function getFeeData() public view override returns (
+        uint256 entryFeeVault, 
+        uint256 exitFeeVault, 
+        uint256 entryFeeProtocol, 
+        uint256 exitFeeProtocol, 
+        uint256 entryFeeCreator, 
+        uint256 exitFeeCreator, 
+        address feeRecipientProtocol, 
+        address feeRecipientCreator){
         return (vaultEntryFee, vaultExitFee, protocolEntryFee, protocolExitFee, creatorEntryFee, creatorExitFee, protocolFeeRecipient, creatorFeeRecipient);
     }
 
@@ -228,10 +244,10 @@ contract ZeroToken is IZeroToken, Ownable, ERC4626 {
 
         super._withdraw(caller, receiver, owner, assets, shares);
 
-        if (protocolFee > 0) {
+        if (protocolFee > 0 && protocolFeeRecipient != address(this)) {
             SafeERC20.safeTransfer(IERC20(asset()), protocolFeeRecipient, protocolFee);
         }
-        if (creatorFee > 0) {
+        if (creatorFee > 0 && creatorFeeRecipient != address(this)) {
             SafeERC20.safeTransfer(IERC20(asset()), creatorFeeRecipient, creatorFee);
         }
     }
@@ -242,10 +258,10 @@ contract ZeroToken is IZeroToken, Ownable, ERC4626 {
      * @param exitFeeBasisPoints The new exit fee in basis points. Must not exceed 50%.
      */
     function setVaultFees(uint256 entryFeeBasisPoints, uint256 exitFeeBasisPoints) public override onlyOwner {
-        if (BASIS < entryFeeBasisPoints * 2) {
+        if (BASIS < entryFeeBasisPoints * 10) {
             revert EntryFeeExceedsLimit(entryFeeBasisPoints);
         }
-        if (BASIS < exitFeeBasisPoints * 2) {
+        if (BASIS < exitFeeBasisPoints * 10) {
             revert ExitFeeExceedsLimit(exitFeeBasisPoints);
         }
         
@@ -292,10 +308,7 @@ contract ZeroToken is IZeroToken, Ownable, ERC4626 {
      * @param entryFeeBasisPoints The new entry fee in basis points. Must not exceed 50%.
      * @param exitFeeBasisPoints The new exit fee in basis points. Must not exceed 50%.
      */
-    function setProtocolFees(uint256 entryFeeBasisPoints, uint256 exitFeeBasisPoints) public override {
-        if(msg.sender != protocolFeeRecipient && protocolFeeRecipient != address(0)){
-            revert NotProtocolRecipient();
-        }
+    function setProtocolFees(uint256 entryFeeBasisPoints, uint256 exitFeeBasisPoints) public override onlyProtocol {
         if (BASIS < entryFeeBasisPoints * 10) {
             revert EntryFeeExceedsLimit(entryFeeBasisPoints);
         }
@@ -307,6 +320,20 @@ contract ZeroToken is IZeroToken, Ownable, ERC4626 {
         protocolExitFee = exitFeeBasisPoints;
 
         emit ProtocolFeesSet(protocolEntryFee, protocolExitFee);
+    }
+
+    /**
+     * @dev Sets the creator fee recipient.
+     * @param newRecipient The new creator fee recipient
+     */
+    function setProtocolFeeRecipient(address newRecipient) public override onlyProtocol {
+        if(newRecipient == address(0)){
+            revert NoRecipient();
+        }
+
+        protocolFeeRecipient = newRecipient;
+
+        emit ProtocolFeeRecipientSet(newRecipient);
     }
 
     /// @dev Calculates the fees that should be added to an amount `assets` that does not already include fees.
