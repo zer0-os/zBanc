@@ -44,8 +44,8 @@ describe.only("ZeroToken Tests", function () {
 
       const basis = 10000;
       
-      const exitFees = [0, basis/10000, basis/1000, basis/100, basis/10, basis/2 - 1];
-      const entryFees = [basis/2 - 1, basis/10, basis/100, basis/1000, basis/10000, 0];
+      const exitFees = [0, basis/1000, basis/100, basis/10];
+      const entryFees = [basis/10, basis/100, basis/1000, 0];
       const creatorEntryFees = [basis/1000, basis/100, basis/10];
       const creatorExitFees = [basis/1000, basis/100, basis/10];
 
