@@ -7,13 +7,15 @@ import {Ownable} from "@openzeppelin/contracts/access/Ownable.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {ERC4626, ERC20, Math} from "@openzeppelin/contracts/token/ERC20/extensions/ERC4626.sol";
 import {SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
+import {ERC20Permit, IERC20Permit, Nonces} from "@openzeppelin/contracts/token/ERC20/extensions/ERC20Permit.sol";
+import {ERC20Votes} from "@openzeppelin/contracts/token/ERC20/extensions/ERC20Votes.sol";
 
 /**
  * @title ZeroToken
  * @dev ZeroToken contract. Enables entry and exit fees on an ERC4626 vault.
  * @custom:security-contact admin@zero.tech
  */
-contract ZeroToken is IZeroToken, Ownable, ERC4626 {
+contract ZeroToken is IZeroToken, Ownable, ERC4626, ERC20Permit, ERC20Votes {
     using Math for uint256;
 
     /// @notice Thrown when the entry fee exceeds the limit.
@@ -139,6 +141,7 @@ contract ZeroToken is IZeroToken, Ownable, ERC4626 {
         Ownable(msg.sender)
         ERC4626(reserveToken)
         ERC20(name, symbol)
+        ERC20Permit(name)
     {
         setVaultFees(vaultEntryFeeBps, vaultExitFeeBps);
         setProtocolFees(protocolEntryFeeBps, protocolExitFeeBps);
@@ -352,4 +355,25 @@ contract ZeroToken is IZeroToken, Ownable, ERC4626 {
     function _decimalsOffset() internal view virtual override returns (uint8) {
         return 1;
     }
+
+    function decimals() public pure override(ERC20, ERC4626) returns (uint8) {
+        return 18;
+    }
+
+    /*function _mint(address to, uint256 amount) internal override(ERC20, ERC20Votes) {
+        super._mint(to, amount);
+    }
+
+    function _burn(address account, uint256 amount) internal override(ERC20, ERC20Votes) {
+        super._burn(account, amount);
+    }*/
+
+    function _update(address from, address to, uint256 value) internal virtual override(ERC20, ERC20Votes) {
+        super._update(from, to, value);
+    }
+
+    function nonces(address owner) public view virtual override(ERC20Permit, Nonces) returns (uint256) {
+        super.nonces(owner);
+    }
+
 }
