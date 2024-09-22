@@ -1,4 +1,4 @@
-Bonding Tokens
+ZBanc Bonding Tokens
 
 Overview
 
@@ -26,8 +26,8 @@ On entry and exit, the vault takes a fee that increases its reserves and in turn
 Other systems are able to integrate with the Bonding Token by utilizing the ERC20 and ERC4626 functions.
 They can deposit tokens and participate in the economy, and they can make donations to the economy to give rewards to bonding token holders.
 
-IMPORTANT:
+Notice:
 Depositors are able to get an effective fee discount on entry by splitting their deposits into multiple smaller deposits.
 This is because previous deposits are able to capture fee accrual on subsequent deposits.
-The impact of issue is mitigated by transaction costs, loss of opportunity for any time interval between deposits, by size of the token economy, and directly by keeping entryFees small.
+The impact of this issue may be mitigated by transaction costs, loss of opportunity for any time interval between deposits, by size of the token economy, and directly by keeping entryFees small.
 The entryFee should be regarded as the maximum fee required when depositing X reserve tokens at once.

@@ -15,7 +15,7 @@ import {ERC20Votes} from "@openzeppelin/contracts/token/ERC20/extensions/ERC20Vo
  * @dev ZeroToken contract. Enables entry and exit fees on an ERC4626 vault.
  * @custom:security-contact admin@zero.tech
  */
-contract ZeroToken is IZeroToken, Ownable, ERC4626, ERC20Permit, ERC20Votes {
+contract ZBanc is IZBanc, Ownable, ERC4626, ERC20Permit, ERC20Votes {
     using Math for uint256;
 
     /// @notice Thrown when the entry fee exceeds the limit.
@@ -359,14 +359,6 @@ contract ZeroToken is IZeroToken, Ownable, ERC4626, ERC20Permit, ERC20Votes {
     function decimals() public pure override(ERC20, ERC4626) returns (uint8) {
         return 18;
     }
-
-    /*function _mint(address to, uint256 amount) internal override(ERC20, ERC20Votes) {
-        super._mint(to, amount);
-    }
-
-    function _burn(address account, uint256 amount) internal override(ERC20, ERC20Votes) {
-        super._burn(account, amount);
-    }*/
 
     function _update(address from, address to, uint256 value) internal virtual override(ERC20, ERC20Votes) {
         super._update(from, to, value);
