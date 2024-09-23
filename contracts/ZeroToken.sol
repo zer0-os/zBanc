@@ -1,22 +1,25 @@
 // SPDX-License-Identifier: MIT
 pragma solidity 0.8.24;
 
-
-import {IZeroToken} from './IZeroToken.sol';
-import {Ownable} from "@openzeppelin/contracts/access/Ownable.sol";
+import {AccessControl} from "@openzeppelin/contracts/access/AccessControl.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {ERC4626, ERC20, Math} from "@openzeppelin/contracts/token/ERC20/extensions/ERC4626.sol";
 import {SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
-import {ERC20Permit, IERC20Permit, Nonces} from "@openzeppelin/contracts/token/ERC20/extensions/ERC20Permit.sol";
+import {ERC20Permit, Nonces} from "@openzeppelin/contracts/token/ERC20/extensions/ERC20Permit.sol";
 import {ERC20Votes} from "@openzeppelin/contracts/token/ERC20/extensions/ERC20Votes.sol";
+import {IZeroToken} from './IZeroToken.sol';
 
 /**
  * @title ZeroToken
  * @dev ZeroToken contract. Enables entry and exit fees on an ERC4626 vault.
  * @custom:security-contact admin@zero.tech
  */
-contract ZBanc is IZBanc, Ownable, ERC4626, ERC20Permit, ERC20Votes {
+contract ZeroToken is IZeroToken, AccessControl, ERC4626, ERC20Permit, ERC20Votes {
     using Math for uint256;
+
+    /// @notice Role definitions
+    bytes32 private constant CREATOR_ROLE = keccak256("CREATOR_ROLE");
+    bytes32 private constant PROTOCOL_ROLE = keccak256("PROTOCOL_ROLE");
 
     /// @notice Thrown when the entry fee exceeds the limit.
     error EntryFeeExceedsLimit(uint256 entryFeeBasisPoints);
@@ -24,14 +27,11 @@ contract ZBanc is IZBanc, Ownable, ERC4626, ERC20Permit, ERC20Votes {
     /// @notice Thrown when the exit fee exceeds the limit.
     error ExitFeeExceedsLimit(uint256 exitFeeBasisPoints);
 
-    ///@notice Thrown when a fee recipient is 0
+    /// @notice Thrown when a fee recipient is zero address.
     error NoRecipient();
 
-    ///@notice Thrown when non protocol fee recipient address tries to set protocol fees
-    error NotProtocolAddress();
-
     /// @notice Emitted when the contract is initialized.
-    /// @param deployer The address of the contract deployer
+    /// @param deployer The address of the contract deployer.
     /// @param name The name of the ERC20 token.
     /// @param symbol The symbol of the ERC20 token.
     /// @param reserveToken The ERC20 token used as the reserve asset.
@@ -42,19 +42,19 @@ contract ZBanc is IZBanc, Ownable, ERC4626, ERC20Permit, ERC20Votes {
         address reserveToken
     );
 
-    /// @notice Emitted when the entry fee is set.
-    /// @param entryFeeBasisPoints The new entry fee in basis points.
-    /// @param exitFeeBasisPoints the new exit fee in basis points.
+    /// @notice Emitted when the vault fees are set.
+    /// @param entryFeeBasisPoints The new vault entry fee in basis points.
+    /// @param exitFeeBasisPoints The new vault exit fee in basis points.
     event VaultFeesSet(uint256 entryFeeBasisPoints, uint256 exitFeeBasisPoints);
 
-    /// @notice Emitted when the entry fee is set.
-    /// @param entryFeeBasisPoints The new entry fee in basis points.
-    /// @param exitFeeBasisPoints the new exit fee in basis points.
+    /// @notice Emitted when the protocol fees are set.
+    /// @param entryFeeBasisPoints The new protocol entry fee in basis points.
+    /// @param exitFeeBasisPoints The new protocol exit fee in basis points.
     event ProtocolFeesSet(uint256 entryFeeBasisPoints, uint256 exitFeeBasisPoints);
 
-    /// @notice Emitted when the entry fee is set.
-    /// @param entryFeeBasisPoints The new entry fee in basis points.
-    /// @param exitFeeBasisPoints the new exit fee in basis points.
+    /// @notice Emitted when the creator fees are set.
+    /// @param entryFeeBasisPoints The new creator entry fee in basis points.
+    /// @param exitFeeBasisPoints The new creator exit fee in basis points.
     event CreatorFeesSet(uint256 entryFeeBasisPoints, uint256 exitFeeBasisPoints);
 
     /// @notice Emitted when the vault fee recipient is set.
@@ -71,7 +71,7 @@ contract ZBanc is IZBanc, Ownable, ERC4626, ERC20Permit, ERC20Votes {
 
     /// @notice The constant basis point used for fee calculations, equivalent to 10000.
     /// @dev This represents 100% in basis points, where 1 basis point is 0.01%.
-    uint256 public constant BASIS = 1e4;
+    uint256 private constant BASIS = 1e4;
 
     /// @notice The entry fee basis points, paid to the vault.
     /// @dev This fee is applied when depositing and minting.
@@ -97,35 +97,26 @@ contract ZBanc is IZBanc, Ownable, ERC4626, ERC20Permit, ERC20Votes {
     /// @dev This fee is applied when redeeming and withdrawing.
     uint256 private creatorExitFee;
 
-    /// @notice The receiver of the protocol fees
+    /// @notice The receiver of the protocol fees.
     /// @dev This recipient is paid during any deposit or withdraw.
     address private protocolFeeRecipient;
 
-    /// @notice The receiver of the creator fees
+    /// @notice The receiver of the creator fees.
     /// @dev This recipient is paid during any deposit or withdraw.
     address private creatorFeeRecipient;
 
-    /// @notice Enforces that msg.sender is the protocol fee recipient address.
-    /// @dev Not enforced when protocolFeeRecipient is uninitialized.
-    modifier onlyProtocol(){
-        if(msg.sender != protocolFeeRecipient && protocolFeeRecipient != address(0)){
-            revert NotProtocolAddress();
-        }
-        _;
-    }
-
-    /// @notice Initializes the contract with the given parameters and sets up the necessary inheritance.
+    /// @notice Initializes the contract with the given parameters and sets up the necessary roles.
     /// @param name The name of the ERC20 token.
     /// @param symbol The symbol of the ERC20 token.
     /// @param reserveToken The ERC20 token used as the reserve asset.
-    /// @param vaultEntryFeeBps The entry fee in basis points (1 basis point = 0.01%).
-    /// @param vaultExitFeeBps The exit fee in basis points (1 basis point = 0.01%).
-    /// @param protocolEntryFeeBps The entry fee in basis points (1 basis point = 0.01%).
-    /// @param protocolExitFeeBps The exit fee in basis points (1 basis point = 0.01%).
-    /// @param creatorEntryFeeBps The entry fee in basis points (1 basis point = 0.01%).
-    /// @param creatorExitFeeBps The exit fee in basis points (1 basis point = 0.01%).
+    /// @param vaultEntryFeeBps The vault entry fee in basis points.
+    /// @param vaultExitFeeBps The vault exit fee in basis points.
+    /// @param protocolEntryFeeBps The protocol entry fee in basis points.
+    /// @param protocolExitFeeBps The protocol exit fee in basis points.
+    /// @param creatorEntryFeeBps The creator entry fee in basis points.
+    /// @param creatorExitFeeBps The creator exit fee in basis points.
     /// @param protocolAddress The protocol fee recipient address.
-    /// @dev This constructor initializes the contract by setting the entry and exit fees and recipients.
+    /// @param adminAddress The default admin role address.
     constructor(
         string memory name,
         string memory symbol,
@@ -136,44 +127,64 @@ contract ZBanc is IZBanc, Ownable, ERC4626, ERC20Permit, ERC20Votes {
         uint256 protocolExitFeeBps,
         uint256 creatorEntryFeeBps,
         uint256 creatorExitFeeBps,
-        address protocolAddress
-    ) 
-        Ownable(msg.sender)
+        address protocolAddress,
+        address adminAddress
+    )
         ERC4626(reserveToken)
         ERC20(name, symbol)
         ERC20Permit(name)
     {
-        setVaultFees(vaultEntryFeeBps, vaultExitFeeBps);
-        setProtocolFees(protocolEntryFeeBps, protocolExitFeeBps);
-        setCreatorFees(creatorEntryFeeBps, creatorExitFeeBps);
-        setCreatorFeeRecipient(msg.sender);
-        setProtocolFeeRecipient(protocolAddress);
+        // Set up roles
+        _grantRole(DEFAULT_ADMIN_ROLE, adminAddress);
+        _grantRole(CREATOR_ROLE, msg.sender);
+        _grantRole(PROTOCOL_ROLE, protocolAddress);
+
+        // Set fees and recipients using internal functions without access modifiers
+        _setVaultFees(vaultEntryFeeBps, vaultExitFeeBps);
+        _setProtocolFees(protocolEntryFeeBps, protocolExitFeeBps);
+        _setCreatorFees(creatorEntryFeeBps, creatorExitFeeBps);
+        _setCreatorFeeRecipient(msg.sender);
+        _setProtocolFeeRecipient(protocolAddress);
 
         emit ZeroTokenDeployed(msg.sender, name, symbol, address(reserveToken));
     }
 
-    ///@notice Returns fee amounts and recipients.
-    ///@dev Consolidates all fee amounts and recipients into one getter.
-    function getFeeData() public view override returns (
-        uint256 entryFeeVault, 
-        uint256 exitFeeVault, 
-        uint256 entryFeeProtocol, 
-        uint256 exitFeeProtocol, 
-        uint256 entryFeeCreator, 
-        uint256 exitFeeCreator, 
-        address feeRecipientProtocol, 
-        address feeRecipientCreator){
-        return (vaultEntryFee, vaultExitFee, protocolEntryFee, protocolExitFee, creatorEntryFee, creatorExitFee, protocolFeeRecipient, creatorFeeRecipient);
+    /// @notice Returns fee amounts and recipients.
+    function getFeeData()
+        public
+        view
+        override
+        returns (
+            uint256 entryFeeVault,
+            uint256 exitFeeVault,
+            uint256 entryFeeProtocol,
+            uint256 exitFeeProtocol,
+            uint256 entryFeeCreator,
+            uint256 exitFeeCreator,
+            address feeRecipientProtocol,
+            address feeRecipientCreator
+        )
+    {
+        return (
+            vaultEntryFee,
+            vaultExitFee,
+            protocolEntryFee,
+            protocolExitFee,
+            creatorEntryFee,
+            creatorExitFee,
+            protocolFeeRecipient,
+            creatorFeeRecipient
+        );
     }
 
     /**
      * @dev Returns the maximum amount of the underlying asset that can be withdrawn from the owner balance in the
-     * Vault, through a withdraw call. 
-     * Overriden with fee limiter.
-     * @param owner The address to check for maximum withdraw
-     */ 
+     * Vault, through a withdraw call.
+     * Overridden with fee limiter.
+     * @param owner The address to check for maximum withdraw.
+     */
     function maxWithdraw(address owner) public view virtual override returns (uint256) {
-        uint assets = _convertToAssets(balanceOf(owner), Math.Rounding.Floor);
+        uint256 assets = _convertToAssets(balanceOf(owner), Math.Rounding.Floor);
         return assets - _feeOnTotal(assets, vaultExitFee + creatorExitFee + protocolExitFee);
     }
 
@@ -206,7 +217,7 @@ contract ZBanc is IZBanc, Ownable, ERC4626, ERC20Permit, ERC20Votes {
      */
     function previewRedeem(uint256 shares) public view override returns (uint256) {
         uint256 assets = super.previewRedeem(shares);
-        return assets - _feeOnTotal(assets,  vaultExitFee + creatorExitFee + protocolExitFee);
+        return assets - _feeOnTotal(assets, vaultExitFee + creatorExitFee + protocolExitFee);
     }
 
     /**
@@ -219,11 +230,11 @@ contract ZBanc is IZBanc, Ownable, ERC4626, ERC20Permit, ERC20Votes {
         return super.previewWithdraw(assets + _feeOnRaw(assets, vaultExitFee + creatorExitFee + protocolExitFee));
     }
 
-    /// @dev Send entry fee to {_entryFeeRecipient}. See {IERC4626-_deposit}.
-    function _deposit(address caller, address receiver, uint256 assets, uint256 shares) internal virtual override {        
+    /// @dev Send entry fee to fee recipients. See {IERC4626-_deposit}.
+    function _deposit(address caller, address receiver, uint256 assets, uint256 shares) internal virtual override {
         uint256 protocolFee = _feeOnTotal(assets, protocolEntryFee);
         uint256 creatorFee = _feeOnTotal(assets, creatorEntryFee);
-        
+
         super._deposit(caller, receiver, assets, shares);
 
         if (protocolFee > 0) {
@@ -234,7 +245,7 @@ contract ZBanc is IZBanc, Ownable, ERC4626, ERC20Permit, ERC20Votes {
         }
     }
 
-    /// @dev Send exit fee to {_exitFeeRecipient}. See {IERC4626-_deposit}.
+    /// @dev Send exit fee to fee recipients. See {IERC4626-_withdraw}.
     function _withdraw(
         address caller,
         address receiver,
@@ -255,23 +266,91 @@ contract ZBanc is IZBanc, Ownable, ERC4626, ERC20Permit, ERC20Votes {
         }
     }
 
-    /**
-     * @dev Sets the vault fees.
-     * @param entryFeeBasisPoints The new entry fee in basis points. Must not exceed 50%.
-     * @param exitFeeBasisPoints The new exit fee in basis points. Must not exceed 50%.
-     */
-    function setVaultFees(uint256 entryFeeBasisPoints, uint256 exitFeeBasisPoints) public override onlyOwner {
+    /// INTERNAL FUNCTIONS WITHOUT ACCESS MODIFIERS
+
+    /// @dev Internal function to set vault fees without access control.
+    function _setVaultFees(uint256 entryFeeBasisPoints, uint256 exitFeeBasisPoints) internal {
         if (BASIS < entryFeeBasisPoints * 10) {
             revert EntryFeeExceedsLimit(entryFeeBasisPoints);
         }
         if (BASIS < exitFeeBasisPoints * 10) {
             revert ExitFeeExceedsLimit(exitFeeBasisPoints);
         }
-        
+
         vaultEntryFee = entryFeeBasisPoints;
         vaultExitFee = exitFeeBasisPoints;
 
         emit VaultFeesSet(entryFeeBasisPoints, exitFeeBasisPoints);
+    }
+
+    /// @dev Internal function to set creator fees without access control.
+    function _setCreatorFees(uint256 entryFeeBasisPoints, uint256 exitFeeBasisPoints) internal {
+        if (BASIS < entryFeeBasisPoints * 10) {
+            revert EntryFeeExceedsLimit(entryFeeBasisPoints);
+        }
+        if (BASIS < exitFeeBasisPoints * 10) {
+            revert ExitFeeExceedsLimit(exitFeeBasisPoints);
+        }
+
+        creatorEntryFee = entryFeeBasisPoints;
+        creatorExitFee = exitFeeBasisPoints;
+
+        emit CreatorFeesSet(creatorEntryFee, creatorExitFee);
+    }
+
+    /// @dev Internal function to set protocol fees without access control.
+    function _setProtocolFees(uint256 entryFeeBasisPoints, uint256 exitFeeBasisPoints) internal {
+        if (BASIS < entryFeeBasisPoints * 10) {
+            revert EntryFeeExceedsLimit(entryFeeBasisPoints);
+        }
+        if (BASIS < exitFeeBasisPoints * 10) {
+            revert ExitFeeExceedsLimit(exitFeeBasisPoints);
+        }
+
+        protocolEntryFee = entryFeeBasisPoints;
+        protocolExitFee = exitFeeBasisPoints;
+
+        emit ProtocolFeesSet(protocolEntryFee, protocolExitFee);
+    }
+
+    /// @dev Internal function to set creator fee recipient without access control.
+    function _setCreatorFeeRecipient(address newRecipient) internal {
+        if (newRecipient == address(0)) {
+            revert NoRecipient();
+        }
+        creatorFeeRecipient = newRecipient;
+
+        _revokeRole(CREATOR_ROLE, creatorFeeRecipient);
+        _grantRole(CREATOR_ROLE, newRecipient);
+
+        emit CreatorFeeRecipientSet(newRecipient);
+    }
+
+    /// @dev Internal function to set protocol fee recipient without access control.
+    function _setProtocolFeeRecipient(address newRecipient) internal {
+        if (newRecipient == address(0)) {
+            revert NoRecipient();
+        }
+
+        protocolFeeRecipient = newRecipient;
+        
+        _revokeRole(PROTOCOL_ROLE, protocolFeeRecipient);
+        _grantRole(PROTOCOL_ROLE, newRecipient);
+        
+        emit ProtocolFeeRecipientSet(newRecipient);
+    }
+
+    /**
+     * @dev Sets the vault fees.
+     * @param entryFeeBasisPoints The new entry fee in basis points. Must not exceed 50%.
+     * @param exitFeeBasisPoints The new exit fee in basis points. Must not exceed 50%.
+     */
+    function setVaultFees(uint256 entryFeeBasisPoints, uint256 exitFeeBasisPoints)
+        public
+        override
+        onlyRole(CREATOR_ROLE)
+    {
+        _setVaultFees(entryFeeBasisPoints, exitFeeBasisPoints);
     }
 
     /**
@@ -279,64 +358,49 @@ contract ZBanc is IZBanc, Ownable, ERC4626, ERC20Permit, ERC20Votes {
      * @param entryFeeBasisPoints The new entry fee in basis points. Must not exceed 50%.
      * @param exitFeeBasisPoints The new exit fee in basis points. Must not exceed 50%.
      */
-    function setCreatorFees(uint256 entryFeeBasisPoints, uint256 exitFeeBasisPoints) public override onlyOwner {
-        if (BASIS < entryFeeBasisPoints * 10) {
-            revert EntryFeeExceedsLimit(entryFeeBasisPoints);
-        }
-        if (BASIS < exitFeeBasisPoints * 10) {
-            revert ExitFeeExceedsLimit(exitFeeBasisPoints);
-        }
-        
-        creatorEntryFee = entryFeeBasisPoints;
-        creatorExitFee = exitFeeBasisPoints;
-
-        emit CreatorFeesSet(creatorEntryFee, creatorExitFee);
+    function setCreatorFees(uint256 entryFeeBasisPoints, uint256 exitFeeBasisPoints)
+        public
+        override
+        onlyRole(CREATOR_ROLE)
+    {
+        _setCreatorFees(entryFeeBasisPoints, exitFeeBasisPoints);
     }
 
     /**
      * @dev Sets the creator fee recipient.
-     * @param newRecipient The new creator fee recipient
+     * @param newRecipient The new creator fee recipient.
      */
-    function setCreatorFeeRecipient(address newRecipient) public override onlyOwner {
-        if(newRecipient == address(0)){
-            revert NoRecipient();
-        }
-        creatorFeeRecipient = newRecipient;
-
-        emit CreatorFeeRecipientSet(newRecipient);
+    function setCreatorFeeRecipient(address newRecipient)
+        public
+        override
+        onlyRole(CREATOR_ROLE)
+    {
+        _setCreatorFeeRecipient(newRecipient);
     }
 
     /**
-     * @dev Sets the protocol fees. Can be set by protocol fee recipient address.
+     * @dev Sets the protocol fees.
      * @param entryFeeBasisPoints The new entry fee in basis points. Must not exceed 50%.
      * @param exitFeeBasisPoints The new exit fee in basis points. Must not exceed 50%.
      */
-    function setProtocolFees(uint256 entryFeeBasisPoints, uint256 exitFeeBasisPoints) public override onlyProtocol {
-        if (BASIS < entryFeeBasisPoints * 10) {
-            revert EntryFeeExceedsLimit(entryFeeBasisPoints);
-        }
-        if (BASIS < exitFeeBasisPoints * 10) {
-            revert ExitFeeExceedsLimit(exitFeeBasisPoints);
-        }
-        
-        protocolEntryFee = entryFeeBasisPoints;
-        protocolExitFee = exitFeeBasisPoints;
-
-        emit ProtocolFeesSet(protocolEntryFee, protocolExitFee);
+    function setProtocolFees(uint256 entryFeeBasisPoints, uint256 exitFeeBasisPoints)
+        public
+        override
+        onlyRole(PROTOCOL_ROLE)
+    {
+        _setProtocolFees(entryFeeBasisPoints, exitFeeBasisPoints);
     }
 
     /**
-     * @dev Sets the creator fee recipient.
-     * @param newRecipient The new creator fee recipient
+     * @dev Sets the protocol fee recipient.
+     * @param newRecipient The new protocol fee recipient.
      */
-    function setProtocolFeeRecipient(address newRecipient) public override onlyProtocol {
-        if(newRecipient == address(0)){
-            revert NoRecipient();
-        }
-
-        protocolFeeRecipient = newRecipient;
-
-        emit ProtocolFeeRecipientSet(newRecipient);
+    function setProtocolFeeRecipient(address newRecipient)
+        public
+        override
+        onlyRole(PROTOCOL_ROLE)
+    {
+        _setProtocolFeeRecipient(newRecipient);
     }
 
     /// @dev Calculates the fees that should be added to an amount `assets` that does not already include fees.
@@ -360,12 +424,24 @@ contract ZBanc is IZBanc, Ownable, ERC4626, ERC20Permit, ERC20Votes {
         return 18;
     }
 
-    function _update(address from, address to, uint256 value) internal virtual override(ERC20, ERC20Votes) {
-        super._update(from, to, value);
+    // Override required by Solidity for multiple inheritance
+    function _update(address from, address to, uint256 amount) internal virtual override(ERC20, ERC20Votes) {
+        super._update(from, to, amount);
     }
 
+    // Override required by Solidity for multiple inheritance
     function nonces(address owner) public view virtual override(ERC20Permit, Nonces) returns (uint256) {
-        super.nonces(owner);
+        return super.nonces(owner);
     }
 
+    // Override supportsInterface to include AccessControl
+    function supportsInterface(bytes4 interfaceId)
+        public
+        view
+        virtual
+        override(AccessControl)
+        returns (bool)
+    {
+        return super.supportsInterface(interfaceId);
+    }
 }
